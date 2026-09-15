@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 设备真实配置（含账号密码，禁止上传）
+devices.json
+
+# 配置备份（自动生成，含密文）
+backup/
+
+# IDE
+.vscode/
+.idea/
+
+# 系统文件
+Thumbs.db
+.DS_Store

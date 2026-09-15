@@ -1,0 +1,10 @@
+{
+    "AR1": {
+        "device_type": "huawei",
+        "host": "192.168.60.1",
+        "username": "admin",
+        "password": "<你的密码>",
+        "port": 22,
+        "encoding": "gbk"
+    }
+}

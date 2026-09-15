@@ -1,0 +1,12 @@
+ssh -o KexAlgorithms=+diffie-hellman-group1-sha1 admin@192.168.60.1
+-o KexAlgorithms=+diffie-hellman-group1-sha1 #因为这个可能采用的交换算法太老了而不兼容，所以使用这个参数临时修改
+
+这是 主机密钥类型也不匹配，你的 OpenSSH 版本太新，连 ssh-rsa 也禁用了。需要同时加上 两个兼容参数：
+ssh -o KexAlgorithms=+diffie-hellman-group1-sha1 -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa admin@192.168.60.1
+
+这是 加密算法（cipher） 又不匹配了……你的 OpenSSH 版本太新，而华为路由器的 VRP 系统太老，算法一层一层全被禁用了。
+ssh -o KexAlgorithms=+diffie-hellman-group1-sha1 -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa -o Ciphers=+aes128-cbc admin@192.168.60.1
+ssh -o KexAlgorithms=+diffie-hellman-group1-sha1,+diffie-hellman-group-exchange-sha1 -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa -o Ciphers=+aes128-cbc,+3des-cbc admin@192.168.60.1
+
+最终版本(适用于SSH算法版本太老)
+ssh -o KexAlgorithms=+diffie-hellman-group1-sha1 -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa -o Ciphers=+aes128-cbc -o MACs=+hmac-sha1 admin@192.168.60.1

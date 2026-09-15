@@ -1,0 +1,11 @@
+设备厂商 编码格式 device_type 
+华为    gbk     huawei 
+华三    gbk     hp_comware 
+Cisco   utf-8   cisco_ios 
+Juniper utf-8   juniper 
+Arista  utf-8   arista_eos
+
+如果不确定设备编码，可以尝试用 gbk 或 gb2312 ，大多数国产网络设备都支持。
+提示 ：如果在输出中看到 b'\xcb\xd8\xca\xd6...' ，基本可以确定是编码不匹配，添加 encoding='gbk' 即可解决。
+
+你能告诉我你的设备是什么品牌（华为、Cisco、华三等）吗？我可以帮你写一个完整可用的脚本。

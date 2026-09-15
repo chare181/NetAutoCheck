@@ -1,0 +1,5 @@
+# 异常处理
+    pip install NetMikoAuthenticationException NetMikoTimeoutException SSHException
+# 常用库
+    pip install paramiko
+    pip install netmiko

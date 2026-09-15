@@ -1,0 +1,7 @@
+| 异常类型 | 含义 | 常见原因 |
+|---------|------|---------|
+| NetMikoTimeoutException | 连接超时 | 设备IP错误、网络不可达、设备未开机、端口未开放 |
+| NetMikoAuthenticationException | 认证失败 | 用户名错误、密码错误、AAA认证配置问题 |
+| socket.error | 底层网络错误 | DNS解析失败、网络链路故障、防火墙拦截 |
+| SSHException | SSH协议错误 | SSH服务未启动、SSH版本不兼容、密钥交换失败 |
+| Exception | 未知异常 | 其他未预期的错误 |
