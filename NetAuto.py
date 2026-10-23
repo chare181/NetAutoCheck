@@ -853,31 +853,69 @@ def manage_inspection(devices, connections):
         else:
             print("当前没有运行中的巡检任务")
 
-def show_main_menu():
-    """显示主菜单"""
-    print("\n" + "="*60)
-    print("            网络设备管理系统")
-    print("="*60)
-    print("            1. 添加单台设备 (自动检测类型)")
-    print("            2. 选择设备并连接")
-    print("            3. 批量连接所有设备")
-    print("            4. 查看已连接设备列表")
-    print("            5. 交互式SSH终端")
-    print("            6. 执行配置命令")
-    print("            7. 备份当前设备配置")
-    print("            8. 批量备份所有设备")
-    print("            9. 查看设备接口信息")
-    print("            10. 查看设备基本信息")
-    print("            11. 查看设备运行状态")
-    print("            12. 删除设备")
-    print("            13. 断开指定设备")
-    print("            14. 断开所有设备")
-    print("            15. 批量导入设备 (BatchDevice.csv/xlsx)")
-    print("            16. 自动化巡检 (周期采集/邮件/日志服务器)")
-    print("            0. 退出程序")
-    print("="*60)
-    choice = input("请选择你要执行的操作 (0-16): ").strip()
-    return choice
+# 主菜单分组：(板块名, 说明, [(子项名称, 原菜单码), ...])
+MENU_GROUPS = [
+    ('设备管理', '添加 / 批量导入 / 删除设备', [
+        ('添加单台设备 (自动检测类型)', '1'),
+        ('批量导入设备 (BatchDevice.csv/xlsx)', '15'),
+        ('删除设备', '12'),
+    ]),
+    ('连接管理', '连接 / 断开 / 已连接列表', [
+        ('连接单台设备', '2'),
+        ('批量连接所有设备', '3'),
+        ('查看已连接设备列表', '4'),
+        ('断开指定设备', '13'),
+        ('断开所有设备', '14'),
+    ]),
+    ('设备运维', 'SSH终端 / 配置下发 / 备份 / 信息查询', [
+        ('交互式SSH终端', '5'),
+        ('执行配置命令', '6'),
+        ('备份当前设备配置', '7'),
+        ('批量备份所有设备', '8'),
+        ('查看设备接口信息', '9'),
+        ('查看设备基本信息', '10'),
+        ('查看设备运行状态', '11'),
+    ]),
+]
+INSPECTION_MENU_CODE = '16'
+
+def show_main_menu(connections=None):
+    """显示分组主菜单，返回对应的操作码（与原编号一致）"""
+    while True:
+        print("\n" + "="*60)
+        print("            网络设备管理系统 v2.0")
+        print("="*60)
+        for i, (name, desc, _) in enumerate(MENU_GROUPS, 1):
+            print(f"  {i}. {name}     {desc}")
+        print(f"  {len(MENU_GROUPS) + 1}. 自动化巡检   周期性采集状态并推送报告")
+        print("  0. 退出程序")
+        if connections:
+            names = list(connections.keys())
+            preview = ', '.join(names[:3]) + ('...' if len(names) > 3 else '')
+            print(f"\n  当前已连接 {len(names)} 台: {preview}")
+        print("="*60)
+
+        choice = input(f"请选择功能板块 (0-{len(MENU_GROUPS) + 1}): ").strip()
+        if choice == '0':
+            return '0'
+        if choice == str(len(MENU_GROUPS) + 1):
+            return INSPECTION_MENU_CODE
+        if not choice.isdigit() or not (1 <= int(choice) <= len(MENU_GROUPS)):
+            print("❌ 无效的选择，请重新输入")
+            continue
+
+        name, _, items = MENU_GROUPS[int(choice) - 1]
+        while True:
+            print(f"\n--- {name} ---")
+            for i, (label, _) in enumerate(items, 1):
+                print(f"  {i}. {label}")
+            print("  0. 返回上级")
+            sub = input("请选择: ").strip()
+            if sub == '0':
+                break
+            if sub.isdigit() and 1 <= int(sub) <= len(items):
+                return items[int(sub) - 1][1]
+            print("❌ 无效的选择，请重新输入")
 
 def show_device_selection(devices, title="可用设备列表"):
     """显示设备选择菜单"""
@@ -1202,7 +1240,7 @@ def main():
     current_device = None
 
     while True:
-        choice = show_main_menu()
+        choice = show_main_menu(connections)
 
         if choice == '1':
             device_name, device_info = add_device_interactive()
