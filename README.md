@@ -212,6 +212,18 @@ chmod +x start.sh
 - 检查防火墙设置
 - 检查用户名密码是否正确
 
+### 虚拟环境报错 "did not find executable"
+
+Python 本体被移动或重装后，旧 `.venv` 会失效（venv 只是指向本机 Python 的引用）。重建即可：
+
+```bash
+# Windows
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+已在 Python 3.14 + netmiko 4.8 环境验证通过。
+
 ## 开发计划
 
 - [ ] Web界面
