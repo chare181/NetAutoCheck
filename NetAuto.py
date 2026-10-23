@@ -1,5 +1,6 @@
 from netmiko import ConnectHandler
 from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException
+import paramiko
 from datetime import datetime
 import time
 import socket
@@ -36,6 +37,80 @@ def clear_screen():
 def get_home_dir():
     """获取用户主目录，跨平台兼容"""
     return os.path.expanduser('~')
+
+def get_base_dir():
+    """获取程序运行基准目录
+
+    - 源码运行: 脚本所在目录
+    - PyInstaller exe 运行: exe 所在目录（而非临时解压目录）
+    """
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+def base_type(device_type):
+    """去掉 _telnet 后缀，获取基础设备类型（用于查厂商/命令映射）"""
+    return device_type.replace('_telnet', '') if device_type else device_type
+
+# SSH legacy 算法兼容参数（华为 VRP5 等老设备只支持 ssh-rsa/group1-sha1 等旧算法，
+# 新版 paramiko 默认优先 SHA2 会导致协商阶段失败）
+LEGACY_SSH_OVERRIDES = {
+    'disabled_algorithms': {'pubkeys': ['rsa-sha2-256', 'rsa-sha2-512']},
+    'allow_agent': False,
+    'look_for_keys': False,
+}
+
+# 支持 Telnet 的设备类型（netmiko 内置）
+TELNET_DEVICE_TYPES = [
+    'huawei_telnet',
+    'hp_comware_telnet',
+    'cisco_ios_telnet',
+    'arista_eos_telnet',
+    'juniper_junos_telnet',
+]
+
+def is_ssh_negotiation_error(exc):
+    """判断异常是否属于 SSH 算法协商失败（老设备典型症状）"""
+    msg = str(exc).lower()
+    keywords = ('negotiation', 'no matching', 'kex', 'incompatible',
+                'handshake', 'key exchange', 'algorithm')
+    return any(k in msg for k in keywords)
+
+def open_connection(params):
+    """统一连接入口：先按常规参数连接，SSH 协商失败时自动降级 legacy 算法
+
+    支持 params 中的自定义字段:
+      - legacy_ssh: true  显式标记老设备，直接走 legacy 参数
+      - protocol: telnet  使用 Telnet（device_type 自动加 _telnet 后缀）
+    """
+    params = dict(params)
+    legacy_ssh = params.pop('legacy_ssh', False)
+    protocol = str(params.pop('protocol', 'ssh')).lower()
+
+    # Telnet 支持：自动补 _telnet 后缀
+    if protocol == 'telnet' and not params['device_type'].endswith('_telnet'):
+        params['device_type'] = params['device_type'] + '_telnet'
+
+    if legacy_ssh:
+        params.update(LEGACY_SSH_OVERRIDES)
+        return ConnectHandler(**params)
+
+    try:
+        return ConnectHandler(**params)
+    except (NetmikoAuthenticationException, NetmikoTimeoutException):
+        raise  # 认证/超时问题降级无意义，直接抛出
+    except Exception as e:
+        # Telnet 不涉及 SSH 协商，不重试
+        if protocol == 'telnet':
+            raise
+        if isinstance(e, paramiko.ssh_exception.SSHException) or is_ssh_negotiation_error(e):
+            print("\n⚠️  SSH算法协商失败，尝试legacy兼容模式（适用于华为VRP5等老设备）...")
+            retry_params = {**params, **LEGACY_SSH_OVERRIDES}
+            conn = ConnectHandler(**retry_params)
+            print("✅ legacy模式连接成功（建议在devices.json中为该设备加 \"legacy_ssh\": true 跳过探测）")
+            return conn
+        raise
+
 
 def ensure_dir(path):
     """确保目录存在，跨平台兼容"""
@@ -138,8 +213,8 @@ COMMAND_MAPPING = {
 }
 
 def get_command(device_type, command_key):
-    """根据设备类型获取对应命令"""
-    mapping = COMMAND_MAPPING.get(device_type, COMMAND_MAPPING['huawei'])
+    """根据设备类型获取对应命令（自动剥离 _telnet 后缀）"""
+    mapping = COMMAND_MAPPING.get(base_type(device_type), COMMAND_MAPPING['huawei'])
     return mapping.get(command_key, '')
 
 def detect_device_type(ip, username, password, port=22, timeout=10):
@@ -153,7 +228,9 @@ def detect_device_type(ip, username, password, port=22, timeout=10):
     print(f"🔍 正在探测设备类型: {ip}")
     print(f"{'='*60}")
 
-    for device_type in SUPPORTED_DEVICE_TYPES:
+    types_to_try = TELNET_DEVICE_TYPES if port == 23 else SUPPORTED_DEVICE_TYPES
+
+    for device_type in types_to_try:
         print(f"尝试 {device_type} ...", end=' ', flush=True)
 
         device_params = {
@@ -163,16 +240,17 @@ def detect_device_type(ip, username, password, port=22, timeout=10):
             'password': password,
             'port': port,
             'timeout': timeout,
+            'conn_timeout': timeout,
             'banner_timeout': timeout,
             'auth_timeout': timeout,
         }
 
         try:
-            conn = ConnectHandler(**device_params)
+            conn = open_connection(device_params)
             prompt = conn.find_prompt()
             conn.disconnect()
 
-            vendor_info = DEVICE_TYPE_INFO.get(device_type, {})
+            vendor_info = DEVICE_TYPE_INFO.get(base_type(device_type), {})
             print(f"✅ 成功!")
             print(f"\n{'='*60}")
             print(f"🎉 设备类型检测结果:")
@@ -222,14 +300,14 @@ def auto_config_device(ip, username, password, port=22, secret=None, timeout=10)
         'username': username,
         'password': password,
         'port': port,
-        'encoding': DEVICE_TYPE_INFO[device_type]['encoding'],
+        'encoding': DEVICE_TYPE_INFO[base_type(device_type)]['encoding'],
     }
 
     if secret:
         device_info['secret'] = secret
 
-    if DEVICE_TYPE_INFO[device_type]['has_secret'] and not secret:
-        print(f"\n⚠️  提示: {DEVICE_TYPE_INFO[device_type]['vendor']} 设备通常需要特权密码")
+    if DEVICE_TYPE_INFO[base_type(device_type)]['has_secret'] and not secret:
+        print(f"\n⚠️  提示: {DEVICE_TYPE_INFO[base_type(device_type)]['vendor']} 设备通常需要特权密码")
         print(f"   如需配置，请在 devices.json 中添加 'secret' 字段")
 
     hostname = prompt.strip('[]<>#').split('-')[0]
@@ -286,8 +364,10 @@ def add_device_interactive():
 
     return None, None
 
-def load_devices_from_file(filename='devices.json'):
-    """从 JSON 文件加载设备配置"""
+def load_devices_from_file(filename=None):
+    """从 JSON 文件加载设备配置（默认读取程序目录下的 devices.json）"""
+    if filename is None:
+        filename = os.path.join(get_base_dir(), 'devices.json')
     try:
         if not os.path.exists(filename):
             print(f"❌ 设备配置文件 {filename} 不存在")
@@ -303,8 +383,10 @@ def load_devices_from_file(filename='devices.json'):
         print(f"❌ 加载设备配置时出错: {str(e)}")
         return {}
 
-def save_devices_to_file(devices, filename='devices.json'):
-    """保存设备配置到 JSON 文件"""
+def save_devices_to_file(devices, filename=None):
+    """保存设备配置到 JSON 文件（默认写入程序目录下的 devices.json）"""
+    if filename is None:
+        filename = os.path.join(get_base_dir(), 'devices.json')
     try:
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(devices, f, indent=4, ensure_ascii=False)
@@ -374,11 +456,12 @@ def connect_single_device(device_info, device_name):
         connect_params = {
             **device_info,
             'timeout': 15,
+            'conn_timeout': 15,
             'banner_timeout': 15,
             'auth_timeout': 10,
         }
 
-        connection = ConnectHandler(**connect_params)
+        connection = open_connection(connect_params)
         print(f"✅ 成功连接到设备: {device_name}")
         return connection
 
@@ -443,7 +526,7 @@ def backup_single_config(connection, device_info, device_name):
         print(f"\n开始备份 {device_name} 配置...")
         hostname = connection.find_prompt().strip('[]<>#').split('-')[0]
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        backup_dir = "backup"
+        backup_dir = os.path.join(get_base_dir(), "backup")
         
         # 使用跨平台目录创建函数
         ensure_dir(backup_dir)

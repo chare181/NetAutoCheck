@@ -17,3 +17,9 @@ backup/
 # 系统文件
 Thumbs.db
 .DS_Store
+
+# PyInstaller 打包产物
+build/
+dist/
+release/
+*.spec

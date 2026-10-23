@@ -111,6 +111,63 @@ pip install netmiko -i https://pypi.tuna.tsinghua.edu.cn/simple
 }
 ```
 
+## 老设备兼容（华为 VRP5 等）
+
+部分老设备（如华为 VRP5 V200R003C00）只支持 `ssh-rsa`、`diffie-hellman-group1-sha1` 等旧版 SSH 算法，新版 SSH 客户端默认禁用这些算法，会在**协商阶段卡住或直接失败**。
+
+本工具已内置自动兼容：检测到协商失败时会自动降级到 legacy 算法重试。
+
+如需跳过探测直接走兼容模式，在设备配置中添加 `"legacy_ssh": true`：
+
+```json
+{
+    "Old-Huawei": {
+        "device_type": "huawei",
+        "host": "192.168.1.254",
+        "username": "admin",
+        "password": "your_password",
+        "port": 22,
+        "legacy_ssh": true,
+        "encoding": "gbk"
+    }
+}
+```
+
+## Telnet 支持
+
+对于仅支持 Telnet 的设备，将端口改为 23 并添加 `"protocol": "telnet"`：
+
+```json
+{
+    "Old-Switch": {
+        "device_type": "huawei",
+        "host": "192.168.1.3",
+        "username": "admin",
+        "password": "your_password",
+        "port": 23,
+        "protocol": "telnet",
+        "encoding": "gbk"
+    }
+}
+```
+
+使用菜单 1 自动探测时，端口填 23 会自动按 Telnet 设备类型探测。
+
+## 打包分发（免 Python 环境）
+
+如果要把工具发给没有 Python 环境的同事使用：
+
+```bash
+# 在开发机上双击运行（或在终端执行）
+build.bat
+```
+
+打包完成后，将 `release\` 目录压缩发出即可。对方电脑**无需安装 Python**，解压后：
+
+1. 复制 `devices.example.json` 改名为 `devices.json` 并填入设备信息
+2. 双击 `NetAuto.exe` 运行
+
+
 ## 跨平台兼容性
 
 ### 已实现的跨平台功能
