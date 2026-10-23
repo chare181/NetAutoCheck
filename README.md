@@ -6,10 +6,14 @@
 
 - 🔍 **自动检测设备类型** - 自动识别华为、华三、锐捷、思科、Juniper等
 - 📱 **交互式SSH终端** - 直接在终端输入命令操作设备
-- 📋 **批量管理** - 批量连接、备份多台设备
+- 🔐 **SSH / Telnet 双协议** - 支持自定义端口，自动兼容华为VRP5等老设备的旧版算法
+- 📋 **批量管理** - 批量导入（CSV/Excel）、批量连接、批量备份
 - 💾 **配置备份** - 自动备份设备配置
 - 📊 **设备状态监测** - 查看CPU、内存、风扇、温度等状态
+- ⏱️ **自动化巡检** - 5分钟~24小时周期采集，推送至本地 / 邮箱 / 日志服务器
+- 🩺 **报错自动诊断** - 连接失败自动分析原因并给出解决办法
 - 🖥️ **跨平台支持** - 完美支持Windows和Linux
+- 📦 **免环境分发** - 一键打包为单个 exe，对方无需安装 Python
 
 ## 支持的设备
 
@@ -82,18 +86,28 @@ pip install netmiko -i https://pypi.tuna.tsinghua.edu.cn/simple
    7. 查看设备运行状态
 
 4. 自动化巡检    周期性采集状态并推送报告
+   1. 开始巡检（选择设备与周期）
+   2. 停止巡检
+   3. 查看巡检状态
+   4. 配置指定设备 / 指定邮箱
 ```
 
 ## 目录结构
 
 ```
 .
-├── NetAuto.py          # 主程序文件
-├── devices.json        # 设备配置文件 (自动生成)
-├── backup/             # 配置备份目录 (自动创建)
-├── start.bat           # Windows启动脚本
-├── start.sh            # Linux启动脚本
-└── README.md           # 本文件
+├── NetAuto.py                  # 主程序文件
+├── devices.json                # 设备配置文件 (自动生成，已 gitignore)
+├── devices.example.json        # 设备配置模板
+├── BatchDevice.example.csv     # 批量导入模板
+├── inspect_settings.json       # 巡检配置 (自动生成，已 gitignore)
+├── backup/                     # 配置备份目录 (自动创建)
+├── reports/                    # 巡检报告目录 (自动创建)
+├── requirements.txt            # Python 依赖
+├── build.bat                   # Windows 一键打包脚本
+├── start.bat                   # Windows 启动脚本
+├── start.sh                    # Linux 启动脚本
+└── README.md                   # 本文件
 ```
 
 ## 设备配置示例 (devices.json)
@@ -120,9 +134,9 @@ pip install netmiko -i https://pypi.tuna.tsinghua.edu.cn/simple
 }
 ```
 
-## 批量导入设备（菜单 15）
+## 批量导入设备（设备管理 → 2）
 
-在程序同目录放置 `BatchDevice.csv` 或 `BatchDevice.xlsx`，选择菜单 15 即可批量导入并可选自动连接。模板参考 `BatchDevice.example.csv`。
+在程序同目录放置 `BatchDevice.csv` 或 `BatchDevice.xlsx`，选择「设备管理 → 2」即可批量导入并可选自动连接。模板参考 `BatchDevice.example.csv`。
 
 表头字段（`*` 为必填）：
 
@@ -141,7 +155,7 @@ pip install netmiko -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 注意：旧版 `.xls` 请先在 Excel 中另存为 `.xlsx` 或 `.csv`。
 
-## 自动化巡检（菜单 16）
+## 自动化巡检（主菜单 4）
 
 对当前已连接的全部或指定设备进行周期性巡检，后台线程运行，不影响菜单操作。
 
@@ -154,7 +168,7 @@ pip install netmiko -i https://pypi.tuna.tsinghua.edu.cn/simple
 - 邮件：SMTP 发送（支持 465/587/25 端口，QQ邮箱等需填授权码）
 - 日志服务器：syslog UDP 发送（默认 514 端口）
 
-**固定巡检对象与收件人**（菜单 16 → 4 配置）：
+**固定巡检对象与收件人**（主菜单 4 → 4 配置）：
 
 - **指定设备**：从全部已配置设备中勾选（可按 `a` 全选、`c` 仅已连接、或输编号如 `1,3`），保存后每次启动巡检自动沿用，无需重复选择；可随时取消指定恢复为启动时选择。未连接的设备在巡检时会自动尝试重连。
 - **指定邮箱**：保存收件人列表（可多个，逗号分隔）。已配置过 SMTP 账号时可直接沿用服务器与账号，仅修改收件人；也可在 `配置巡检参数 → 查看当前配置` 中确认全部当前设置。
@@ -212,7 +226,7 @@ pip install netmiko -i https://pypi.tuna.tsinghua.edu.cn/simple
 }
 ```
 
-使用菜单 1 自动探测时，端口填 23 会自动按 Telnet 设备类型探测。
+使用「设备管理 → 1」自动探测时，端口填 23 会自动按 Telnet 设备类型探测。
 
 ## 打包分发（免 Python 环境）
 
@@ -288,9 +302,9 @@ py -3.14 -m venv .venv
 ## 开发计划
 
 - [ ] Web界面
-- [ ] 定时任务
 - [ ] 配置对比
-- [ ] 告警通知
+- [ ] 巡检指标阈值告警（CPU/内存/温度超限主动告警）
+- [ ] 巡检报告导出 PDF
 
 ## License
 
