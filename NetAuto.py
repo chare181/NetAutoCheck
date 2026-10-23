@@ -396,6 +396,158 @@ def save_devices_to_file(devices, filename=None):
         print(f"❌ 保存设备配置失败: {str(e)}")
         return False
 
+def parse_bool(value):
+    """解析表格中的布尔值"""
+    return str(value).strip().lower() in ('true', '1', 'yes', 'y', '是')
+
+def import_devices_from_file(devices):
+    """扫描程序目录下的 BatchDevice 表格文件，批量导入设备
+
+    支持 BatchDevice.csv / BatchDevice.xlsx，字段:
+    name*, host*, username*, password*, device_type, port, secret, encoding, protocol, legacy_ssh
+
+    返回: 新导入的设备 {name: info}
+    """
+    base_dir = get_base_dir()
+    candidates = [f for f in os.listdir(base_dir)
+                  if f.lower().startswith('batchdevice')
+                  and not f.lower().startswith('batchdevice.example')
+                  and f.lower().endswith(('.csv', '.xlsx', '.xls'))]
+
+    if not candidates:
+        print(f"\n❌ 在 {base_dir} 下未找到 BatchDevice.csv / BatchDevice.xlsx")
+        print("   请参考 BatchDevice.example.csv 模板填写后重试")
+        return {}
+
+    print(f"\n找到 {len(candidates)} 个设备表格:")
+    for i, f in enumerate(candidates, 1):
+        print(f"  {i}. {f}")
+
+    if len(candidates) == 1:
+        selected = candidates[0]
+        print(f"自动选择: {selected}")
+    else:
+        sel = input("请选择要导入的文件编号: ").strip()
+        if not sel.isdigit() or not (1 <= int(sel) <= len(candidates)):
+            print("❌ 无效选择")
+            return {}
+        selected = candidates[int(sel) - 1]
+
+    filepath = os.path.join(base_dir, selected)
+    ext = os.path.splitext(selected)[1].lower()
+
+    # 读取行数据
+    rows = []
+    try:
+        if ext == '.csv':
+            import csv
+            content = None
+            for enc in ('utf-8-sig', 'gbk'):  # Excel 导出的中文 CSV 多为 GBK
+                try:
+                    with open(filepath, 'r', encoding=enc) as f:
+                        content = list(csv.reader(f))
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if content is None:
+                print("❌ CSV 编码无法识别（支持 UTF-8 / GBK）")
+                return {}
+            rows = content
+        elif ext == '.xlsx':
+            try:
+                from openpyxl import load_workbook
+            except ImportError:
+                print("❌ 读取 xlsx 需要 openpyxl: pip install openpyxl")
+                print("   或将文件另存为 CSV 后重试")
+                return {}
+            wb = load_workbook(filepath, read_only=True, data_only=True)
+            ws = wb.active
+            for row in ws.iter_rows(values_only=True):
+                rows.append(['' if c is None else str(c) for c in row])
+            wb.close()
+        else:  # .xls
+            print("❌ 不支持旧版 .xls 格式，请在 Excel 中另存为 .xlsx 或 .csv")
+            return {}
+    except Exception as e:
+        print(f"❌ 读取文件失败: {str(e)}")
+        return {}
+
+    if len(rows) < 2:
+        print("❌ 表格为空或只有表头")
+        return {}
+
+    # 解析表头
+    headers = [h.strip().lower() for h in rows[0]]
+    required = ['name', 'host', 'username', 'password']
+    missing = [h for h in required if h not in headers]
+    if missing:
+        print(f"❌ 表头缺少必需字段: {', '.join(missing)}")
+        print(f"   当前表头: {', '.join(headers)}")
+        return {}
+
+    idx = {h: headers.index(h) for h in headers}
+    imported = {}
+    skipped = 0
+
+    for lineno, row in enumerate(rows[1:], 2):
+        if not row or not ''.join(row).strip():
+            continue  # 跳过空行
+
+        def cell(key, default=''):
+            i = idx.get(key)
+            return row[i].strip() if i is not None and i < len(row) else default
+
+        name, host = cell('name'), cell('host')
+        username, password = cell('username'), cell('password')
+        if not all([name, host, username, password]):
+            print(f"  ⚠️ 第{lineno}行缺少必填字段，已跳过")
+            skipped += 1
+            continue
+        if name in devices:
+            print(f"  ⚠️ 设备 {name} 已存在，已覆盖")
+
+        device_type = cell('device_type', 'huawei') or 'huawei'
+        protocol = cell('protocol', 'ssh').lower() or 'ssh'
+        port_str = cell('port')
+        if port_str.isdigit():
+            port = int(port_str)
+        else:
+            port = 23 if protocol == 'telnet' else 22
+
+        info = {
+            'device_type': device_type,
+            'host': host,
+            'username': username,
+            'password': password,
+            'port': port,
+            'encoding': cell('encoding') or DEVICE_TYPE_INFO.get(
+                base_type(device_type), {}).get('encoding', 'utf-8'),
+        }
+        secret = cell('secret')
+        if secret:
+            info['secret'] = secret
+        if protocol == 'telnet':
+            info['protocol'] = 'telnet'
+        if parse_bool(cell('legacy_ssh')):
+            info['legacy_ssh'] = True
+
+        devices[name] = info
+        imported[name] = info
+
+    if not imported:
+        print(f"❌ 没有成功导入任何设备（跳过 {skipped} 行）")
+        return {}
+
+    save_devices_to_file(devices)
+    print(f"\n✅ 成功导入 {len(imported)} 台设备" +
+          (f"，跳过 {skipped} 行" if skipped else ""))
+
+    choice = input("是否立即批量连接这些设备? (y/n): ").strip().lower()
+    if choice == 'y':
+        return imported
+    return {}
+
+
 def show_main_menu():
     """显示主菜单"""
     print("\n" + "="*60)
@@ -415,9 +567,10 @@ def show_main_menu():
     print("            12. 删除设备")
     print("            13. 断开指定设备")
     print("            14. 断开所有设备")
+    print("            15. 批量导入设备 (BatchDevice.csv/xlsx)")
     print("            0. 退出程序")
     print("="*60)
-    choice = input("请选择你要执行的操作 (0-14): ").strip()
+    choice = input("请选择你要执行的操作 (0-15): ").strip()
     return choice
 
 def show_device_selection(devices, title="可用设备列表"):
@@ -900,6 +1053,14 @@ def main():
             disconnect_all(connections)
             connections.clear()
             current_device = None
+
+        elif choice == '15':
+            imported = import_devices_from_file(devices)
+            if imported:
+                new_connections = batch_connect_devices(imported)
+                connections.update(new_connections)
+                if new_connections:
+                    current_device = next(iter(new_connections.keys()))
 
         elif choice == '0':
             disconnect_all(connections)

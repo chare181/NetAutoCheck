@@ -34,6 +34,7 @@ if exist release rmdir /s /q release
 mkdir release
 copy /y dist\NetAuto.exe release\ >nul
 copy /y devices.example.json release\ >nul
+copy /y BatchDevice.example.csv release\ >nul
 copy /y README.md release\ >nul
 
 echo.
@@ -43,6 +44,7 @@ echo ========================================
 echo   Output: release\
 echo     - NetAuto.exe
 echo     - devices.example.json
+echo     - BatchDevice.example.csv  (batch import template)
 echo     - README.md
 echo.
 echo   Zip the release folder and share it:

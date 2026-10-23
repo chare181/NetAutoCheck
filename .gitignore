@@ -23,3 +23,5 @@ build/
 dist/
 release/
 *.spec
+
+release.zip

@@ -72,6 +72,7 @@ pip install netmiko -i https://pypi.tuna.tsinghua.edu.cn/simple
 12. 删除设备
 13. 断开指定设备
 14. 断开所有设备
+15. 批量导入设备 (BatchDevice.csv/xlsx)
 0. 退出程序
 ```
 
@@ -110,6 +111,27 @@ pip install netmiko -i https://pypi.tuna.tsinghua.edu.cn/simple
     }
 }
 ```
+
+## 批量导入设备（菜单 15）
+
+在程序同目录放置 `BatchDevice.csv` 或 `BatchDevice.xlsx`，选择菜单 15 即可批量导入并可选自动连接。模板参考 `BatchDevice.example.csv`。
+
+表头字段（`*` 为必填）：
+
+| 字段 | 必填 | 说明 | 默认值 |
+|------|------|------|--------|
+| name | * | 设备名称 | - |
+| host | * | IP 地址 | - |
+| username | * | 登录用户名 | - |
+| password | * | 登录密码 | - |
+| device_type | | 设备类型（见上表） | huawei |
+| port | | 端口 | SSH=22 / Telnet=23 |
+| secret | | 特权密码（思科等） | 空 |
+| encoding | | 编码 | 按厂商自动 |
+| protocol | | ssh / telnet | ssh |
+| legacy_ssh | | 老设备兼容模式 true/false | false |
+
+注意：旧版 `.xls` 请先在 Excel 中另存为 `.xlsx` 或 `.csv`。
 
 ## 老设备兼容（华为 VRP5 等）
 
