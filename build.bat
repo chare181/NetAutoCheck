@@ -1,36 +1,35 @@
 @echo off
-chcp 65001 >nul
 echo ========================================
-echo   NetAuto 打包工具 - 生成免Python环境的exe
+echo   NetAuto Build - Package to single exe
 echo ========================================
 echo.
 
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo ❌ 未找到Python，打包需要本机先安装Python 3.7+
+    echo [ERROR] Python not found. Install Python 3.7+ first.
     pause
     exit /b 1
 )
 
-echo [1/3] 安装打包依赖...
+echo [1/3] Installing build dependencies...
 pip install -r requirements.txt pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple
 if errorlevel 1 (
-    echo ❌ 依赖安装失败
+    echo [FAIL] pip install failed
     pause
     exit /b 1
 )
 
 echo.
-echo [2/3] 使用 PyInstaller 打包单文件 exe...
+echo [2/3] Packaging with PyInstaller...
 pyinstaller --onefile --name NetAuto --clean --noconfirm NetAuto.py
 if errorlevel 1 (
-    echo ❌ 打包失败
+    echo [FAIL] PyInstaller build failed
     pause
     exit /b 1
 )
 
 echo.
-echo [3/3] 整理发布目录 release\ ...
+echo [3/3] Preparing release folder...
 if exist release rmdir /s /q release
 mkdir release
 copy /y dist\NetAuto.exe release\ >nul
@@ -39,16 +38,16 @@ copy /y README.md release\ >nul
 
 echo.
 echo ========================================
-echo   ✅ 打包完成！
+echo   [OK] Build complete!
 echo ========================================
-echo   发布文件位于: release\
-echo     - NetAuto.exe            主程序（双击即用）
-echo     - devices.example.json   设备配置模板
-echo     - README.md              使用说明
+echo   Output: release\
+echo     - NetAuto.exe
+echo     - devices.example.json
+echo     - README.md
 echo.
-echo   将 release\ 压缩发给别人即可，对方：
-echo   1. 解压
-echo   2. 复制 devices.example.json 改名为 devices.json 并填入设备信息
-echo   3. 双击 NetAuto.exe
+echo   Zip the release folder and share it:
+echo   1. Unzip
+echo   2. Copy devices.example.json to devices.json, fill in device info
+echo   3. Double-click NetAuto.exe
 echo ========================================
 pause
