@@ -25,3 +25,6 @@ release/
 *.spec
 
 release.zip
+
+inspect_settings.json
+reports/
