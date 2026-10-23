@@ -755,28 +755,153 @@ def _inspect_loop(targets, interval_sec, settings, connections, devices):
         if inspect_state['stop_event'].wait(interval_sec):
             break
 
+def _list_devices_for_selection(devices, connections):
+    """列出全部设备及连接状态"""
+    names = list(devices.keys())
+    print("\n设备列表:")
+    for i, n in enumerate(names, 1):
+        status = '已连接' if n in connections else '未连接'
+        print(f"  {i}. {n:<16} {devices[n].get('host', '?'):<16} [{status}]")
+    return names
+
+def choose_inspection_targets(devices, connections, save=True):
+    """选择巡检设备，可选择保存为“指定设备”"""
+    if not devices:
+        print("❌ 没有可用的设备配置")
+        return []
+    names = _list_devices_for_selection(devices, connections)
+    sel = input("巡检范围 - a=全部 / c=仅已连接 / 编号逗号分隔(如 1,3): ").strip().lower()
+
+    if sel == 'a' or not sel:
+        targets = names
+    elif sel == 'c':
+        targets = [n for n in names if n in connections]
+    else:
+        targets = [names[int(x) - 1] for x in sel.split(',')
+                   if x.strip().isdigit() and 1 <= int(x) <= len(names)]
+    targets = list(dict.fromkeys(targets))
+    if not targets:
+        print("❌ 未选择任何设备")
+        return []
+
+    if save and input("是否将该选择保存为“指定设备”? (y/n): ").strip().lower() == 'y':
+        settings = load_inspect_settings()
+        settings['targets'] = targets
+        save_inspect_settings(settings)
+        print(f"✅ 已保存指定设备: {', '.join(targets)}")
+    return targets
+
+def configure_email(settings):
+    """配置邮件通道；已有配置时只需修改收件人"""
+    old = settings.get('email', {})
+    if old.get('enabled') and old.get('server'):
+        print(f"\n当前发件: {old.get('username', '')} @ {old.get('server')}:{old.get('port', 465)}")
+        print(f"当前收件人: {', '.join(old.get('to', [])) or '(未设置)'}")
+        if input("沿用发件服务器与账号? (y/n, 默认y): ").strip().lower() != 'n':
+            to = input("收件邮箱(逗号分隔，直接回车保持不变): ").strip()
+            recipients = [x.strip() for x in to.split(',') if x.strip()] or old.get('to', [])
+            if not recipients:
+                print("⚠️ 未设置收件人，邮件通道未启用")
+                settings['email'] = {**old, 'enabled': False}
+                return
+            settings['email'] = {**old, 'enabled': True, 'to': recipients}
+            print(f"✅ 邮件收件人已更新: {', '.join(recipients)}")
+            return
+
+    print("--- 邮箱配置（QQ邮箱示例: smtp.qq.com / 465 / 授权码）---")
+    port_str = input("端口(465/587/25, 默认465): ").strip()
+    recipients = [x.strip() for x in input("收件邮箱(多个用逗号分隔): ").split(',') if x.strip()]
+    if not recipients:
+        print("⚠️ 未填写收件人，邮件通道未启用")
+        settings['email'] = {**old, 'enabled': False}
+        return
+    settings['email'] = {
+        'enabled': True,
+        'server': input("SMTP服务器: ").strip(),
+        'port': int(port_str) if port_str.isdigit() else 465,
+        'username': input("发件邮箱: ").strip(),
+        'password': input("邮箱密码/授权码: ").strip(),
+        'to': recipients,
+    }
+    print(f"✅ 邮件通道已启用，收件人: {', '.join(recipients)}")
+
+def show_inspection_config():
+    """查看当前巡检配置"""
+    settings = load_inspect_settings()
+    targets = settings.get('targets', [])
+    email = settings.get('email', {})
+    syslog = settings.get('syslog', {})
+
+    print("\n===== 当前巡检配置 =====")
+    print(f"指定设备: {', '.join(targets) if targets else '(未设置，启动时选择)'}")
+    print(f"本地文件: {'开启' if settings.get('local', {}).get('enabled', True) else '关闭'}")
+    if email.get('enabled'):
+        print(f"邮件发送: 开启 | {email.get('server')}:{email.get('port', 465)} | 收件人 {', '.join(email.get('to', []))}")
+    else:
+        saved_to = f"（已保存收件人: {', '.join(email['to'])}）" if email.get('to') else ""
+        print(f"邮件发送: 关闭{saved_to}")
+    if syslog.get('enabled'):
+        print(f"日志服务器: 开启 | {syslog.get('server')}:{syslog.get('port', 514)}")
+    else:
+        print("日志服务器: 关闭")
+    print("="*24)
+
+def configure_inspection(devices, connections):
+    """巡检参数配置：指定设备 / 指定邮箱"""
+    while True:
+        print("\n===== 巡检参数配置 =====")
+        print("  1. 配置指定设备（巡检哪些设备）")
+        print("  2. 配置指定邮箱（收件人列表）")
+        print("  3. 查看当前配置")
+        print("  0. 返回")
+        choice = input("请选择: ").strip()
+        if choice == '0':
+            return
+        if choice == '1':
+            settings = load_inspect_settings()
+            saved = [n for n in settings.get('targets', []) if n in devices]
+            if saved:
+                print(f"\n当前指定设备({len(saved)}台): {', '.join(saved)}")
+                act = input("1. 重新选择  2. 取消指定(恢复启动时选择)  0. 返回: ").strip()
+                if act == '1':
+                    choose_inspection_targets(devices, connections, save=True)
+                elif act == '2':
+                    settings.pop('targets', None)
+                    save_inspect_settings(settings)
+                    print("✅ 已取消指定设备")
+                continue
+            choose_inspection_targets(devices, connections, save=True)
+        elif choice == '2':
+            settings = load_inspect_settings()
+            configure_email(settings)
+            save_inspect_settings(settings)
+        elif choice == '3':
+            show_inspection_config()
+        else:
+            print("❌ 无效的选择，请重新输入")
+
 def start_inspection(devices, connections):
     """配置并启动周期巡检"""
     if inspect_state['thread'] and inspect_state['thread'].is_alive():
         print("⚠️ 巡检任务已在运行中，请先停止（菜单16→2）")
         return
-    if not connections:
-        print("❌ 当前没有已连接的设备，请先通过菜单 2/3/15 连接设备")
+    if not devices:
+        print("❌ 没有可巡检的设备配置，请先添加或批量导入设备")
         return
 
-    # 1) 选择巡检范围
-    names = list(connections.keys())
-    print("\n已连接设备:")
-    for i, n in enumerate(names, 1):
-        print(f"  {i}. {n}")
-    sel = input("巡检范围 - 输入 a 巡检全部，或编号逗号分隔(如 1,3): ").strip().lower()
-    if sel == 'a' or not sel:
-        targets = names
+    settings = load_inspect_settings()
+
+    # 1) 巡检范围：优先使用已保存的“指定设备”
+    saved = [n for n in settings.get('targets', []) if n in devices]
+    if saved:
+        print(f"\n已保存指定设备({len(saved)}台): {', '.join(saved)}")
+        if input("使用该指定设备列表? (y/n，n=重新选择): ").strip().lower() != 'n':
+            targets = saved
+        else:
+            targets = choose_inspection_targets(devices, connections, save=True)
     else:
-        targets = [names[int(x) - 1] for x in sel.split(',')
-                   if x.strip().isdigit() and 1 <= int(x) <= len(names)]
+        targets = choose_inspection_targets(devices, connections, save=True)
     if not targets:
-        print("❌ 未选择任何设备")
         return
 
     # 2) 选择巡检周期
@@ -790,20 +915,13 @@ def start_inspection(devices, connections):
     interval_label, interval_sec = INSPECT_INTERVALS[int(idx) - 1]
 
     # 3) 输出方式配置
-    settings = load_inspect_settings()
     has_prev = settings['email'].get('enabled') or settings['syslog'].get('enabled')
-    if not (has_prev and input("沿用上次输出配置? (y/n): ").strip().lower() == 'y'):
+    if has_prev and input("\n沿用上次输出配置? (y/n): ").strip().lower() == 'y':
+        show_inspection_config()
+    else:
         settings['local']['enabled'] = input("保存到本地文件? (y/n, 默认y): ").strip().lower() != 'n'
         if input("发送至邮箱? (y/n): ").strip().lower() == 'y':
-            print("--- 邮箱配置（以QQ邮箱为例: smtp.qq.com 端口465，密码填授权码）---")
-            settings['email'] = {
-                'enabled': True,
-                'server': input("SMTP服务器: ").strip(),
-                'port': int(input("端口(465/587/25, 默认465): ").strip() or 465),
-                'username': input("发件邮箱: ").strip(),
-                'password': input("邮箱密码/授权码: ").strip(),
-                'to': [x.strip() for x in input("收件邮箱(多个用逗号分隔): ").split(',') if x.strip()],
-            }
+            configure_email(settings)
         else:
             settings['email']['enabled'] = False
         if input("发送至日志服务器(syslog)? (y/n): ").strip().lower() == 'y':
@@ -841,6 +959,7 @@ def manage_inspection(devices, connections):
     print("  1. 开始巡检")
     print("  2. 停止巡检")
     print("  3. 查看巡检状态")
+    print("  4. 配置指定设备 / 指定邮箱")
     print("  0. 返回")
     choice = input("请选择: ").strip()
     if choice == '1':
@@ -852,6 +971,8 @@ def manage_inspection(devices, connections):
             print(f"✅ 巡检运行中: {inspect_state['desc']}")
         else:
             print("当前没有运行中的巡检任务")
+    elif choice == '4':
+        configure_inspection(devices, connections)
 
 # 主菜单分组：(板块名, 说明, [(子项名称, 原菜单码), ...])
 MENU_GROUPS = [
