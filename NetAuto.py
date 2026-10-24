@@ -656,6 +656,9 @@ DEFAULT_ALERT_SETTINGS = {
     'suppress_minutes': 120,      # 同一告警抑制窗口(分钟)
     'check_interface_down': True, # 接口 Down 告警
     'check_config_change': True,  # 配置变更告警
+    'check_loop_suspect': True,   # 疑似环路检测
+    'stp_change_threshold': 5,    # 单轮 STP 拓扑变化次数阈值
+    'flap_threshold': 2,          # 单轮接口状态翻转次数阈值
     'alert_to': [],               # 告警收件人，留空则用 email.to
     'devices': {},                # 例: {"Core1": {"cpu_threshold": 90, "ignore_interfaces": ["GE0/0/1"]}}
 }
@@ -793,6 +796,42 @@ def config_digest(output):
     normalized = '\n'.join(l.rstrip() for l in output.splitlines() if l.strip())
     return hashlib.md5(normalized.encode('utf-8', 'ignore')).hexdigest()
 
+# 疑似环路检测命令（按厂商）
+LOOP_COMMANDS = {
+    'huawei': {'stp_tc': 'display stp topology-change', 'logbuffer': 'display logbuffer'},
+    'hp_comware': {'stp_tc': 'display stp topology-change', 'logbuffer': 'display logbuffer'},
+    'ruijie': {'stp_tc': 'show spanning-tree topology change', 'logbuffer': 'show logging'},
+    'cisco_ios': {'stp_tc': 'show spanning-tree detail', 'logbuffer': 'show logging'},
+    'cisco_xe': {'stp_tc': 'show spanning-tree detail', 'logbuffer': 'show logging'},
+}
+
+# 日志中的环路特征关键字
+LOOP_LOG_KEYWORDS = (
+    'loop detected', 'loopback detected', 'mac move', 'mac flapping',
+    'mac address moved', 'broadcast storm', 'storm control',
+)
+
+def parse_stp_tc_count(output):
+    """解析 STP 拓扑变化累计次数（用于计算单轮增量）"""
+    if not output:
+        return None
+    m = re.search(r'(?:Number of topology changes|Topology change count)\s*:?\s*(\d+)',
+                  output, re.I)
+    if m:
+        return int(m.group(1))
+    # 华为表格形态: "0      5      2024-05-20 10:36:29"
+    m = re.search(r'^\s*\d+\s+(\d+)\s+\d{4}-\d{2}-\d{2}', output, re.M)
+    if m:
+        return int(m.group(1))
+    return None
+
+def parse_loop_log_hits(output):
+    """统计日志中环路特征关键字出现次数（用于计算单轮增量）"""
+    if not output:
+        return None
+    low = output.lower()
+    return sum(low.count(k) for k in LOOP_LOG_KEYWORDS)
+
 # ==================== 巡检采集 ====================
 
 def collect_inspection_data(targets, connections, devices, settings):
@@ -807,6 +846,7 @@ def collect_inspection_data(targets, connections, devices, settings):
             'name': name, 'host': info.get('host', '?'), 'type': base,
             'reachable': False, 'cpu': None, 'memory': None, 'temperature': None,
             'if_total': 0, 'if_up': 0, 'if_down': 0, 'down_interfaces': [],
+            'stp_count': None, 'log_hits': None,
             'config_hash': None, 'error': '', 'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
 
@@ -852,6 +892,18 @@ def collect_inspection_data(targets, connections, devices, settings):
                         row['config_hash'] = config_digest(conn.send_command(cfg_cmd, read_timeout=60))
                     except Exception:
                         row['config_hash'] = None
+
+            # 疑似环路信号：STP 拓扑变化累计次数 + 日志环路特征条数
+            if alert_cfg.get('check_loop_suspect', True):
+                for signal, cmd in LOOP_COMMANDS.get(base, {}).items():
+                    try:
+                        output = conn.send_command(cmd, read_timeout=30)
+                    except Exception:
+                        continue
+                    if signal == 'stp_tc':
+                        row['stp_count'] = parse_stp_tc_count(output)
+                    else:
+                        row['log_hits'] = parse_loop_log_hits(output)
 
             row['reachable'] = True
         except Exception as e:
@@ -947,16 +999,17 @@ def evaluate_alerts(rows, settings, state):
                 clear('temperature_high', '', '设备温度恢复正常')
 
         # 5) 接口 Down（与上一轮比对，仅新增/恢复时告警）
+        ignore = set(cfg.get('ignore_interfaces', []))
+        prev_down = set(dev.get('down_interfaces', []))
+        cur_down = set(row['down_interfaces']) - ignore
+        if_changes = len(prev_down ^ cur_down)   # 本轮接口状态变化数（环路指标之一）
         if cfg.get('check_interface_down', True):
-            ignore = set(cfg.get('ignore_interfaces', []))
-            prev_down = set(dev.get('down_interfaces', []))
-            cur_down = set(row['down_interfaces']) - ignore
             for iface in sorted(cur_down - prev_down):
                 emit('if_down', 'MAJOR' if not prev_down else 'MINOR',
                      f'接口 {iface} Down', iface)
             for iface in sorted(prev_down - cur_down):
                 clear('if_down', iface, f'接口 {iface} 已恢复 Up')
-            dev['down_interfaces'] = sorted(cur_down)
+        dev['down_interfaces'] = sorted(cur_down)
 
         # 6) 配置变更（每次变更各告警一次，不重复）
         if cfg.get('check_config_change') and row['config_hash']:
@@ -966,6 +1019,43 @@ def evaluate_alerts(rows, settings, state):
                                'type': '设备配置发生变更',
                                'time': now.strftime('%Y-%m-%d %H:%M:%S')})
             dev['config_hash'] = row['config_hash']
+
+        # 7) 疑似环路（STP变化 + 日志特征 + 接口翻转，三指标联合，降低误报）
+        if cfg.get('check_loop_suspect', True):
+            score = 0
+            reasons = []
+
+            stp = row.get('stp_count')
+            prev_stp = dev.get('stp_count')
+            stp_delta = 0
+            if stp is not None and prev_stp is not None and stp >= prev_stp:
+                stp_delta = stp - prev_stp   # 计数器重置时忽略本轮
+            if stp is not None:
+                dev['stp_count'] = stp
+            if stp_delta >= int(cfg.get('stp_change_threshold', 5)):
+                score += 2
+                reasons.append(f'STP拓扑变化{stp_delta}次')
+
+            hits = row.get('log_hits')
+            prev_hits = dev.get('log_hits')
+            log_delta = 0
+            if hits is not None and prev_hits is not None and hits >= prev_hits:
+                log_delta = hits - prev_hits
+            if hits is not None:
+                dev['log_hits'] = hits
+            if log_delta >= 1:
+                score += 2
+                reasons.append(f'日志环路特征{log_delta}条')
+
+            if if_changes >= int(cfg.get('flap_threshold', 2)):
+                score += 1
+                reasons.append(f'接口状态翻转{if_changes}次')
+
+            if score >= 3:
+                emit('loop_suspect', 'CRITICAL',
+                     '疑似环路（' + '，'.join(reasons) + '）', '')
+            else:
+                clear('loop_suspect', '', '疑似环路告警解除')
 
     return alerts, recovered
 
@@ -1259,6 +1349,8 @@ def show_inspection_config():
         print(f"  连续确认: {a.get('confirm_rounds')} 轮 | 抑制窗口: {a.get('suppress_minutes')} 分钟")
         print(f"  接口Down告警: {'开' if a.get('check_interface_down', True) else '关'} | "
               f"配置变更告警: {'开' if a.get('check_config_change', True) else '关'}")
+        print(f"  疑似环路检测: {'开' if a.get('check_loop_suspect', True) else '关'} "
+              f"(STP变化≥{a.get('stp_change_threshold')}次 或 接口翻转≥{a.get('flap_threshold')}次)")
         print(f"  告警收件人: {', '.join(a.get('alert_to') or []) or '（同巡检邮箱）'}")
     print("="*24)
 
@@ -1278,6 +1370,8 @@ def configure_alerts(settings):
     ask_int('温度 告警阈值(℃)', 'temperature_threshold')
     ask_int('连续确认轮数', 'confirm_rounds')
     ask_int('告警抑制窗口(分钟)', 'suppress_minutes')
+    ask_int('疑似环路: STP拓扑变化阈值(次/轮)', 'stp_change_threshold')
+    ask_int('疑似环路: 接口翻转阈值(次/轮)', 'flap_threshold')
 
     cur_to = ', '.join(alerts.get('alert_to') or [])
     val = input(f"告警收件人（逗号分隔，回车保持不变，输入 - 表示使用巡检邮箱）[{cur_to or '同巡检邮箱'}]: ").strip()
@@ -1292,6 +1386,9 @@ def configure_alerts(settings):
     ).strip().lower() != 'n'
     alerts['check_config_change'] = input(
         f"启用配置变更告警? (y/n, 当前{'y' if alerts.get('check_config_change', True) else 'n'}): "
+    ).strip().lower() != 'n'
+    alerts['check_loop_suspect'] = input(
+        f"启用疑似环路检测? (y/n, 当前{'y' if alerts.get('check_loop_suspect', True) else 'n'}): "
     ).strip().lower() != 'n'
     print("✅ 告警配置已更新")
 
