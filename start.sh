@@ -24,17 +24,23 @@ else
     PIP_CMD=pip3
 fi
 
-# 检查并安装依赖
+# 检查并安装依赖（优先使用 requirements.txt，保证 netmiko / openpyxl 版本一致）
 echo "检查依赖..."
-REQUIREMENTS=("netmiko" "paramiko")
-for pkg in "${REQUIREMENTS[@]}"; do
-    $PIP_CMD show "$pkg" > /dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        echo "正在安装 $pkg..."
-        $PIP_CMD install "$pkg" -i https://pypi.tuna.tsinghua.edu.cn/simple
-    fi
-done
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REQ_FILE="$SCRIPT_DIR/requirements.txt"
+if [ -f "$REQ_FILE" ]; then
+    $PIP_CMD install -r "$REQ_FILE" -i https://pypi.tuna.tsinghua.edu.cn/simple
+else
+    REQUIREMENTS=("netmiko" "paramiko" "openpyxl")
+    for pkg in "${REQUIREMENTS[@]}"; do
+        $PIP_CMD show "$pkg" > /dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            echo "正在安装 $pkg..."
+            $PIP_CMD install "$pkg" -i https://pypi.tuna.tsinghua.edu.cn/simple
+        fi
+    done
+fi
 
 echo ""
 echo "启动NetAuto..."
-python3 NetAuto.py
+python3 "$SCRIPT_DIR/NetAuto.py"

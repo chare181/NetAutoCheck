@@ -6,6 +6,8 @@ venv/
 
 # 设备真实配置（含账号密码，禁止上传）
 devices.json
+BatchDevice.csv
+BatchDevice.xlsx
 
 # 配置备份（自动生成，含密文）
 backup/

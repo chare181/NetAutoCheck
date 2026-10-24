@@ -1,18 +1,33 @@
 @echo off
 chcp 65001 >nul
+setlocal
 echo ========================================
-echo   NetAuto - 网络设备管理系统 (Windows)
+echo   NetAuto - Network Device Manager
 echo ========================================
 echo.
+
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo ❌ 未找到Python，请先安装Python 3.7+
-    echo    下载地址: https://www.python.org/downloads/
+    echo [ERROR] Python not found. Install Python 3.7+ first.
+    echo         https://www.python.org/downloads/
     pause
     exit /b 1
 )
+echo [OK] Python detected
 
-echo ✅ Python环境检测通过
+python -c "import netmiko, openpyxl" >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] Installing dependencies...
+    python -m pip install -r requirements.txt
+    if errorlevel 1 (
+        echo [ERROR] Dependency installation failed.
+        echo         Run manually: pip install -r requirements.txt
+        pause
+        exit /b 1
+    )
+)
+echo [OK] Dependencies ready
 echo.
+
 python NetAuto.py
 pause

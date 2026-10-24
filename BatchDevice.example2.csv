@@ -1,6 +1,0 @@
-﻿name,host,username,password,device_type,port,secret,encoding,protocol,legacy_ssh
-A03-Core1,192.168.166.100,admin,admin@123,huawei,1600,,gbk,ssh,true
-A03-AGG1,192.168.166.101,admin,admin@123,huawei,1600,,gbk,ssh,false
-A03-AGG2,192.168.166.102,admin,admin@123,huawei,1600,,gbk,ssh,false
-A03-ACC1,192.168.166.103,admin,admin@123,huawei,1600,,gbk,ssh,false
-A03-ACC2,192.168.166.104,admin,admin@123,huawei,1600,,gbk,ssh,false

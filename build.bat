@@ -21,7 +21,7 @@ if errorlevel 1 (
 
 echo.
 echo [2/3] Packaging with PyInstaller...
-pyinstaller --onefile --name NetAuto --clean --noconfirm --hidden-import openpyxl NetAuto.py
+pyinstaller --onefile --name NetAuto --clean --noconfirm --collect-all openpyxl NetAuto.py
 if errorlevel 1 (
     echo [FAIL] PyInstaller build failed
     pause

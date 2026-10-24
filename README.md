@@ -4,7 +4,7 @@
 
 ## 功能特性
 
-- 🔍 **自动检测设备类型** - 自动识别华为、华三、锐捷、思科、Juniper等
+- 🔍 **自动检测设备类型** - 自动识别华为、华三、锐捷、思科、Juniper、Arista、HP等
 - 📱 **交互式SSH终端** - 直接在终端输入命令操作设备
 - 🔐 **SSH / Telnet 双协议** - 支持自定义端口，自动兼容华为VRP5等老设备的旧版算法
 - 📋 **批量管理** - 批量导入（CSV/Excel）、批量连接、批量备份
@@ -29,12 +29,13 @@
 | 思科 NX-OS | cisco_nxos |
 | Juniper | juniper_junos |
 | Arista | arista_eos |
+| HP ProCurve | hp_procurve |
 
 ## 快速开始
 
 ### Windows
 
-双击 `start.bat` 即可启动，或手动运行：
+双击 `start.bat` 即可启动（首次运行会自动安装缺失依赖），或手动运行：
 
 ```bash
 python NetAuto.py
@@ -56,11 +57,11 @@ python3 NetAuto.py
 ## 依赖安装
 
 ```bash
-# 推荐：一次安装全部依赖（netmiko 负责设备连接，openpyxl 负责 Excel 报表/批量导入）
+# 推荐：一次安装全部依赖（netmiko 负责设备连接，paramiko 负责底层 SSH，openpyxl 负责 Excel 报表）
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 或单独安装
-pip install netmiko openpyxl -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install netmiko paramiko openpyxl -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
 ## 菜单说明
@@ -93,7 +94,11 @@ pip install netmiko openpyxl -i https://pypi.tuna.tsinghua.edu.cn/simple
    1. 开始巡检（选择设备与周期）
    2. 停止巡检
    3. 查看巡检状态
-   4. 配置指定设备 / 指定邮箱 / 告警阈值
+   4. 配置巡检参数
+      1. 指定设备（巡检哪些设备）
+      2. 指定邮箱（收件人列表）
+      3. 告警阈值与抑制
+      4. 查看当前配置
 ```
 
 ## 目录结构
@@ -110,8 +115,9 @@ pip install netmiko openpyxl -i https://pypi.tuna.tsinghua.edu.cn/simple
 ├── reports/                    # 巡检 xlsx 报表目录 (自动创建)
 ├── requirements.txt            # Python 依赖
 ├── build.bat                   # Windows 一键打包脚本
-├── start.bat                   # Windows 启动脚本
-├── start.sh                    # Linux 启动脚本
+├── start.bat                   # Windows 启动脚本（自动检查依赖）
+├── start.sh                    # Linux 启动脚本（自动检查依赖）
+├── tips/                       # 设备调试笔记（非运行必需）
 └── README.md                   # 本文件
 ```
 
@@ -160,9 +166,11 @@ pip install netmiko openpyxl -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 注意：旧版 `.xls` 请先在 Excel 中另存为 `.xlsx` 或 `.csv`。
 
+批量连接时会显示 `[i/N] [进度条] 百分比 正在连接 xxx`，全部完成后输出成功/失败清单与总耗时，避免误以为程序卡死。
+
 ## 自动化巡检（主菜单 4）
 
-对当前已连接的全部或指定设备进行周期性巡检，后台线程运行，不影响菜单操作。
+对已配置的全部或指定设备进行周期性巡检，后台线程运行，不影响菜单操作。未连接的设备会自动尝试重连，失败则记录原因并跳过。
 
 **巡检周期**：5分钟 / 30分钟 / 1小时 / 4小时 / 6小时 / 12小时 / 24小时
 
@@ -171,9 +179,10 @@ pip install netmiko openpyxl -i https://pypi.tuna.tsinghua.edu.cn/simple
 **输出方式**（可多选，配置自动保存复用）：
 - 本地报表：`reports/inspection_report_YYYYMMDD_HHMMSS.xlsx`
 - 邮件：发送 Excel 报表**附件**（含「巡检汇总」「告警记录」两个工作表），正文仅保留摘要
+- 若运行环境缺少 openpyxl，会自动改用 CSV 附件并在控制台给出提示，邮件不会出现“无附件”
 - 日志服务器：syslog UDP 发送异常摘要（默认 514 端口）
 
-**报表内容（仅关键信息）**：设备名称、管理IP、设备类型、在线状态、CPU%、内存%、温度、接口总数/Up/Down、Down接口明细、采集时间。
+**报表内容（仅关键信息）**：设备名称、管理IP、设备类型、在线状态、CPU%、内存%、温度、接口总数/Up/Down、Down接口明细、采集时间、软件版本。
 
 ## 异常告警
 
@@ -208,7 +217,7 @@ pip install netmiko openpyxl -i https://pypi.tuna.tsinghua.edu.cn/simple
 - 计数器回退（设备重启导致数值变小）时不计算增量，避免误报
 - 告警文案固定标注「**疑似**」，不承诺确诊——精准定位仍需 SNMP Trap 或设备侧 loop-detection
 
-**支持的厂商**：华为 / 华三 / 锐捷 / 思科（其他厂商自动跳过该检测）。
+**支持的厂商**：华为 / 华三 / 锐捷 / 思科（含 NX-OS）/ Arista / HP ProCurve（其他厂商自动跳过该检测）。
 
 **防误报机制**：
 
@@ -294,7 +303,8 @@ build.bat
 打包完成后，将 `release\` 目录压缩发出即可。对方电脑**无需安装 Python**，解压后：
 
 1. 复制 `devices.example.json` 改名为 `devices.json` 并填入设备信息
-2. 双击 `NetAuto.exe` 运行
+2. 如需批量导入，复制 `BatchDevice.example.csv` 为 `BatchDevice.csv` 并按格式填写
+3. 双击 `NetAuto.exe` 运行
 
 
 ## 跨平台兼容性

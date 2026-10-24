@@ -1,0 +1,10 @@
+name,host,username,password,device_type,port,secret,encoding,protocol,legacy_ssh
+AR1,192.168.60.1,admin,your_password,huawei,22,,gbk,ssh,false
+SW-Telnet,192.168.1.3,admin,your_password,huawei,23,,gbk,telnet,false
+Old-VRP5,192.168.1.254,admin,your_password,huawei,22,,gbk,ssh,true
+Cisco-Core,192.168.1.2,admin,your_password,cisco_ios,22,enable_password,utf-8,ssh,false
+A03-Core1,192.168.166.100,admin,Huawei@123,huawei,1600,,gbk,ssh,true
+A03-AGG1,192.168.166.101,admin,Huawei@123,huawei,1600,,gbk,ssh,false
+A03-AGG2,192.168.166.102,admin,Huawei@123,huawei,1600,,gbk,ssh,false
+A03-ACC1,192.168.166.103,admin,Huawei@123,huawei,1600,,gbk,ssh,false
+A03-ACC2,192.168.166.104,admin,Huawei@123,huawei,1600,,gbk,ssh,false

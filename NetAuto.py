@@ -293,6 +293,22 @@ COMMAND_MAPPING = {
         'show_power': 'show chassis power',
         'show_version': 'show version',
     },
+    'arista_eos': {
+        'show_interfaces': 'show interfaces status',
+        'show_config': 'show running-config',
+        'show_saved_config': 'show running-config',
+        'show_cpu': 'show processes top once',
+        'show_version': 'show version',
+    },
+    'hp_procurve': {
+        'show_interfaces': 'show interfaces brief',
+        'show_config': 'show running-config',
+        'show_saved_config': 'show config',
+        'show_cpu': 'show cpu',
+        'show_memory': 'show memory',
+        'show_temperature': 'show system',
+        'show_version': 'show version',
+    },
 }
 
 def get_command(device_type, command_key):
@@ -789,6 +805,19 @@ def parse_interface_stats(output):
             down_list.append(name)
     return total, up, down, down_list
 
+def parse_version(output):
+    """提取设备软件版本号（用于报表展示）"""
+    if not output:
+        return None
+    for line in output.splitlines():
+        if 'version' in line.lower():
+            m = re.search(r'[Vv]ersion\s+([^\s,]+)', line)
+            if m:
+                return m.group(1).strip('.')[:40]
+            return line.strip()[:60]
+    first = output.strip().splitlines()[0] if output.strip() else ''
+    return first[:60] or None
+
 def config_digest(output):
     """配置文本指纹，用于检测配置变更"""
     if not output:
@@ -803,6 +832,9 @@ LOOP_COMMANDS = {
     'ruijie': {'stp_tc': 'show spanning-tree topology change', 'logbuffer': 'show logging'},
     'cisco_ios': {'stp_tc': 'show spanning-tree detail', 'logbuffer': 'show logging'},
     'cisco_xe': {'stp_tc': 'show spanning-tree detail', 'logbuffer': 'show logging'},
+    'cisco_nxos': {'stp_tc': 'show spanning-tree summary', 'logbuffer': 'show logging'},
+    'arista_eos': {'stp_tc': 'show spanning-tree detail', 'logbuffer': 'show logging'},
+    'hp_procurve': {'stp_tc': 'show spanning-tree', 'logbuffer': 'show logging'},
 }
 
 # 日志中的环路特征关键字
@@ -846,7 +878,7 @@ def collect_inspection_data(targets, connections, devices, settings):
             'name': name, 'host': info.get('host', '?'), 'type': base,
             'reachable': False, 'cpu': None, 'memory': None, 'temperature': None,
             'if_total': 0, 'if_up': 0, 'if_down': 0, 'down_interfaces': [],
-            'stp_count': None, 'log_hits': None,
+            'version': None, 'stp_count': None, 'log_hits': None,
             'config_hash': None, 'error': '', 'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
 
@@ -881,6 +913,8 @@ def collect_inspection_data(targets, connections, devices, settings):
                     row['memory'] = parse_memory_usage(output)
                 elif key == 'show_temperature':
                     row['temperature'] = parse_temperature(output)
+                elif key == 'show_version':
+                    row['version'] = parse_version(output)
                 elif key == 'show_interfaces':
                     total, up, down, down_list = parse_interface_stats(output)
                     row.update(if_total=total, if_up=up, if_down=down, down_interfaces=down_list)
@@ -1075,7 +1109,7 @@ def build_excel_report(rows, alerts, path):
     ws.title = '巡检汇总'
 
     headers = ['设备名称', '管理IP', '设备类型', '状态', 'CPU(%)', '内存(%)',
-               '温度(℃)', '接口总数', 'Up', 'Down', 'Down接口', '采集时间']
+               '温度(℃)', '接口总数', 'Up', 'Down', 'Down接口', '采集时间', '版本']
     ws.append(headers)
 
     head_fill = PatternFill('solid', fgColor='1F4E78')
@@ -1099,13 +1133,13 @@ def build_excel_report(rows, alerts, path):
             row['memory'] if row['memory'] is not None else '-',
             row['temperature'] if row['temperature'] is not None else '-',
             row['if_total'], row['if_up'], row['if_down'],
-            down_text, row['time'],
+            down_text, row['time'], row['version'] or '-',
         ])
         if not row['reachable'] or row['if_down']:
             for cell in ws[ws.max_row]:
                 cell.fill = abnormal_fill
 
-    for i, width in enumerate([18, 16, 14, 8, 9, 9, 10, 10, 7, 8, 34, 20], 1):
+    for i, width in enumerate([18, 16, 14, 8, 9, 9, 10, 10, 7, 8, 34, 20, 30], 1):
         ws.column_dimensions[get_column_letter(i)].width = width
     ws.freeze_panes = 'A2'
     ws.auto_filter.ref = f'A1:{get_column_letter(len(headers))}{ws.max_row}'
@@ -1124,6 +1158,34 @@ def build_excel_report(rows, alerts, path):
         ws2.append(['-', '-', '-', '本轮无告警'])
 
     wb.save(path)
+    return path
+
+def build_csv_report(rows, alerts, path):
+    """备用报表（CSV）：openpyxl 不可用时保证邮件仍有附件"""
+    import csv
+    headers = ['设备名称', '管理IP', '设备类型', '状态', 'CPU(%)', '内存(%)',
+               '温度(℃)', '接口总数', 'Up', 'Down', 'Down接口', '采集时间', '版本']
+    with open(path, 'w', newline='', encoding='utf-8-sig') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        for row in rows:
+            down_text = ', '.join(row['down_interfaces'][:10])
+            if len(row['down_interfaces']) > 10:
+                down_text += f' 等{len(row["down_interfaces"])}个'
+            writer.writerow([
+                row['name'], row['host'], row['type'],
+                '在线' if row['reachable'] else '异常',
+                row['cpu'] if row['cpu'] is not None else '-',
+                row['memory'] if row['memory'] is not None else '-',
+                row['temperature'] if row['temperature'] is not None else '-',
+                row['if_total'], row['if_up'], row['if_down'],
+                down_text, row['time'], row['version'] or '-',
+            ])
+        if alerts:
+            writer.writerow([])
+            writer.writerow(['告警时间', '级别', '设备', '告警内容'])
+            for a in alerts:
+                writer.writerow([a['time'], a['level'], a['device'], a['type']])
     return path
 
 def _smtp_send(email_cfg, to_list, subject, body, attachment=None):
@@ -1157,30 +1219,49 @@ def _smtp_send(email_cfg, to_list, subject, body, attachment=None):
         server.quit()
 
 def deliver_inspection_report(rows, alerts, recovered, settings):
-    """分发报表：本地 xlsx / 邮件附件 / syslog；告警单独即时推送"""
+    """分发报表：本地 xlsx/csv / 邮件附件 / syslog；告警单独即时推送"""
     ts = _now_ts()
+    email = settings.get('email', {})
+    local_on = settings.get('local', {}).get('enabled', True)
+    email_on = bool(email.get('enabled') and email.get('to'))
     path = None
 
-    if settings.get('local', {}).get('enabled', True):
+    # 需要本地保存或邮件附件时都要生成报表文件
+    if local_on or email_on:
+        reports_dir = os.path.join(get_base_dir(), 'reports')
+        ensure_dir(reports_dir)
+        xlsx_path = os.path.join(reports_dir, f'inspection_report_{ts}.xlsx')
         try:
-            reports_dir = os.path.join(get_base_dir(), 'reports')
-            ensure_dir(reports_dir)
-            path = os.path.join(reports_dir, f'inspection_report_{ts}.xlsx')
-            build_excel_report(rows, alerts, path)
-            print(f"[巡检] 报表已保存: {path}")
+            build_excel_report(rows, alerts, xlsx_path)
+            path = xlsx_path
+        except ImportError as e:
+            print(f"[巡检] ⚠️ Excel 报表生成失败（缺少 openpyxl: {e}），改用 CSV")
         except Exception as e:
-            print(f"[巡检] 报表生成失败: {type(e).__name__} {e}")
-            path = None
+            print(f"[巡检] ⚠️ Excel 报表生成失败: {type(e).__name__} {e}，改用 CSV")
 
-    email = settings.get('email', {})
-    if email.get('enabled') and email.get('to'):
+        if path is None:   # 兜底：CSV 不依赖第三方库，保证邮件一定有附件
+            csv_path = os.path.join(reports_dir, f'inspection_report_{ts}.csv')
+            try:
+                path = build_csv_report(rows, alerts, csv_path)
+            except Exception as e:
+                print(f"[巡检] ❌ CSV 报表生成失败: {type(e).__name__} {e}")
+                path = None
+
+        if local_on and path:
+            print(f"[巡检] 报表已保存: {path}")
+
+    if email_on:
         try:
             abnormal = [r for r in rows if not r['reachable'] or r['if_down']]
             body = (f"网络设备巡检报表 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                    f"巡检设备: {len(rows)} 台 | 异常设备: {len(abnormal)} 台 | 本轮告警: {len(alerts)} 条\n"
-                    f"详见附件 Excel 报表。")
+                    f"巡检设备: {len(rows)} 台 | 异常设备: {len(abnormal)} 台 | 本轮告警: {len(alerts)} 条\n")
+            if path:
+                body += f"详见附件 {os.path.basename(path)}。"
+            else:
+                body += "⚠️ 附件生成失败，请检查运行环境（pip install openpyxl）或重新打包。"
             _smtp_send(email, email['to'], f'网络设备巡检报表 {ts}', body, path)
-            print(f"[巡检] 报表已发送至: {','.join(email['to'])}")
+            print(f"[巡检] 报表已发送至: {','.join(email['to'])}" +
+                  (f"（附件 {os.path.basename(path)}）" if path else "（无附件）"))
         except Exception as e:
             print(f"[巡检] 邮件发送失败: {type(e).__name__} {e}")
 
@@ -1652,14 +1733,28 @@ def connect_single_device(device_info, device_name):
         return None
 
 def batch_connect_devices(devices):
-    """批量连接所有设备"""
+    """批量连接所有设备（带进度显示）"""
     connections = {}
-    print(f"\n开始批量连接 {len(devices)} 个设备...")
-    for name, info in devices.items():
+    failed = []
+    total = len(devices)
+    print(f"\n开始批量连接 {total} 个设备...")
+    start_time = time.time()
+
+    for idx, (name, info) in enumerate(devices.items(), 1):
+        percent = int(idx * 100 / total) if total else 100
+        filled = int(20 * idx / total) if total else 20
+        bar = '#' * filled + '-' * (20 - filled)
+        print(f"\n[{idx}/{total}] [{bar}] {percent}%  正在连接 {name} ({info.get('host', '?')}) ...")
         conn = connect_single_device(info, name)
         if conn:
             connections[name] = conn
-    print(f"\n✅ 成功连接 {len(connections)}/{len(devices)} 个设备")
+        else:
+            failed.append(name)
+
+    elapsed = time.time() - start_time
+    print(f"\n✅ 批量连接完成: 成功 {len(connections)}/{total}，耗时 {elapsed:.1f} 秒")
+    if failed:
+        print(f"❌ 失败 {len(failed)} 台: {', '.join(failed)}")
     return connections
 
 def show_connected_devices(connections):
