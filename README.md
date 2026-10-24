@@ -56,8 +56,11 @@ python3 NetAuto.py
 ## 依赖安装
 
 ```bash
-# 国内用户推荐使用清华源
-pip install netmiko -i https://pypi.tuna.tsinghua.edu.cn/simple
+# 推荐：一次安装全部依赖（netmiko 负责设备连接，openpyxl 负责 Excel 报表/批量导入）
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 或单独安装
+pip install netmiko openpyxl -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
 ## 菜单说明
