@@ -27,6 +27,7 @@ release/
 release.zip
 
 inspect_settings.json
+alert_state.json
 reports/
 
 release*.zip
